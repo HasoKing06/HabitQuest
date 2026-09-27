@@ -2335,6 +2335,8 @@ div:has(> [data-hq-app]) > :not([data-hq-app]){ display:none !important; }
 html{ --hq-status: var(--bg); -webkit-text-size-adjust:100%; }
 html[data-mode="light"]{ --hq-status: var(--ink); }
 @media (max-width: 699px){
+  /* --hq-h is the true screen height, set by the phone script (see make_standalone.py). */
+  html, body{ height:var(--hq-h, 100%) !important; }
   [data-hq-app]{
     box-sizing:border-box;
     border-top:env(safe-area-inset-top, 0px) solid var(--hq-status) !important;
@@ -15197,6 +15199,12 @@ var CER_HTML="\n<div class=\"stage\">\n  <div class=\"drain\"></div>\n  <div cla
 <script data-standalone="phone">
 if ('serviceWorker' in navigator) addEventListener('load', function(){ navigator.serviceWorker.register('sw.js'); });
 try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch(e){}
+(function(){ var home = navigator.standalone || (window.matchMedia && matchMedia('(display-mode: standalone)').matches);
+  function fit(){ var h = innerHeight, up = innerHeight >= innerWidth;
+    var full = up ? Math.max(screen.width, screen.height) : Math.min(screen.width, screen.height);
+    if (home && full > h && full - h <= 80) h = full;
+    document.documentElement.style.setProperty('--hq-h', h + 'px'); }
+  fit(); addEventListener('resize', fit); addEventListener('orientationchange', function(){ setTimeout(fit, 300); }); })();
 </script>
 </body>
 </html>

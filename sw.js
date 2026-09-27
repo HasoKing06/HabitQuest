@@ -1,7 +1,7 @@
 // Habit Quest offline cache. The page is fetched fresh whenever the phone is
 // online, so a new build arrives on the next open; offline, the last copy
 // opens. Fonts are kept once fetched. The ledger lives in localStorage, never here.
-const CACHE = 'hq-v1';
+const CACHE = 'hq-v2';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icon-180.png', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {

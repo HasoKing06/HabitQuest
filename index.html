@@ -8875,6 +8875,266 @@ const MYTHIC_AURAS = [
 // m138: the frame a banner skill's tier builds round the card, six steps from Tier 4 to Tier 9.
 const FRAME_STEPS = [[4, 'BANNER', 'a pennant in the skill colour'], [5, 'CORNERS', 'corner pieces'], [6, 'GILT', 'the edge turns to metal'],
   [7, 'LIGHT', 'a light runs round the edge'], [8, 'EMBLEMS', 'studs at the corners and sides'], [9, 'ILLUMINATED', 'a ribbon, an inner rule and a sheen']];
+// m205 (2026-11-21): painted card grounds, from the Zemin rounds 2-3 board (Hasan's picks). Same rule as every ground: the strength
+// sits at the edges and round the class mark, the middle where the type sits stays quiet, drawn in the card's two class colours.
+// groundP(variant, ids, cls, d, app) -> element, or null when the ground is still drawn by groundV2 / groundT.
+function groundP(variant, ids, cls, d, app){
+  const E = React.createElement, W = 340, H = 560, GOLD = '#E6C46A';
+  const SC = SKILL_COLOR;
+  const abs = { position:'absolute', left:0, top:0, right:0, bottom:0, overflow:'hidden', pointerEvents:'none' };
+  const f = n => (Math.round(n * 10) / 10).toString();
+  // colour mixing: k > 0 toward white, k < 0 toward black
+  const tone = (hex, k) => { const n = parseInt(hex.slice(1), 16), c = [n >> 16, n >> 8 & 255, n & 255].map(v => Math.round(k > 0 ? v + (255 - v) * k : v * (1 + k)));
+    return '#' + c.map(v => v.toString(16).padStart(2, '0')).join(''); };
+  let seed = 7; const rnd = (a, b) => { seed = seed * 16807 % 2147483647; return a + (b - a) * seed / 2147483647; };
+  const st = s => s.map(([o, c, a]) => `<stop offset="${o}" stop-color="${c}" stop-opacity="${a == null ? 1 : a}"/>`).join('');
+  const lg = (id, x1, y1, x2, y2, s) => `<linearGradient id="${id}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}">${st(s)}</linearGradient>`;
+  const rg = (id, cx, cy, r, s, u) => `<radialGradient id="${id}" cx="${cx}" cy="${cy}" r="${r}"${u ? ' gradientUnits="userSpaceOnUse"' : ''}>${st(s)}</radialGradient>`;
+  // shared filters: a soft drop shadow (things sit on the card), a lit lip (things are raised), blurs, grain
+  const kit = k => `<filter id="sh${k}" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#000" flood-opacity=".6"/></filter>`
+    + `<filter id="em${k}" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="-.8" dy="-.8" stdDeviation=".4" flood-color="#fff" flood-opacity=".35"/><feDropShadow dx="1.5" dy="3" stdDeviation="2.4" flood-color="#000" flood-opacity=".65"/></filter>`
+    + `<filter id="b4${k}"><feGaussianBlur stdDeviation="4"/></filter><filter id="b18${k}" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="18"/></filter>`
+    + `<filter id="gr${k}"><feTurbulence type="fractalNoise" baseFrequency=".85" numOctaves="2" stitchTiles="stitch"/><feColorMatrix values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 .6 0"/></filter>`
+    + lg('ft' + k, 0, 0, 0, 1, [[.55, '#000', 0], [1, '#000', .5]]) + rg('vg' + k, .5, .45, .75, [[.6, '#000', 0], [1, '#000', .45]]);
+  const finish = k => `<rect width="${W}" height="${H}" fill="url(#vg${k})"/><rect width="${W}" height="${H}" fill="url(#ft${k})"/><rect width="${W}" height="${H}" filter="url(#gr${k})" opacity=".05"/>`;
+  const svg = (inner, key) => E('span', { key: key || 's', style: abs, dangerouslySetInnerHTML: { __html:
+    `<svg width="100%" height="100%" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg" style="display:block">${inner}</svg>` } });
+  const hush = (o, at) => E('span', { key: 'h', style: Object.assign({}, abs, { background: `radial-gradient(60% 42% at 50% ${at || 46}%, rgb(var(--scrim-rgb) / ${o}), transparent 100%)` }) });
+  const wrap = (...k) => E('span', { style: Object.assign({ containerType: 'inline-size' }, abs) }, ...k);
+  const mirror = (s, x) => `<g transform="translate(${W} 0) scale(-1 1)">${s}</g>` + (x || '');
+  // pieces that belong to the class mark sit on it: 90px under the top of a full card, the same share of a small preview
+  const pinMark = (inner, R, key) => E('span', { key: key || 'm', style: { position: 'absolute', left: '50%', top: 'min(90px, 26.9cqw)', width: f(R * 2 / 3.34) + 'cqw', height: f(R * 2 / 3.34) + 'cqw', transform: 'translate(-50%, -50%)', pointerEvents: 'none' },
+    dangerouslySetInnerHTML: { __html: `<svg width="100%" height="100%" viewBox="${-R} ${-R} ${2 * R} ${2 * R}" xmlns="http://www.w3.org/2000/svg" style="display:block;overflow:visible">${inner}</svg>` } });
+  const P = {};
+  // CONSTELLATION: your eight skills as stars in a sky of soft cloud
+  P.stars = (A, B, k, c, orig, d) => { seed = 11; const S = (d.skills || []), mx = Math.max(1, ...S.map(s => s.xp || 0));
+    const order = ['strength','endurance','mobility','mind','knowledge','vitality','creativity','charisma'];
+    const pts = order.map((id, i) => { const s = S.find(x => x.id === id) || { xp: 0, tier: 0 }, a = i / 8 * Math.PI * 2 - Math.PI / 2 + .2, rr = 70 + Math.sqrt((s.xp || 0) / mx) * 120;
+      return [W / 2 + Math.cos(a) * rr, 290 + Math.sin(a) * rr * 1.25, s.tier || 0, SC[id]]; });
+    let s = `<defs>${kit(k)}${rg('sk' + k, .5, .3, .85, [[0, A, .22], [.5, B, .08], [1, '#000', 0]])}${rg('cr' + k, .5, .5, .5, [[0, '#fff'], [.3, '#fff', .6], [1, '#fff', 0]])}</defs><rect width="${W}" height="${H}" fill="url(#sk${k})"/>`
+      + `<g filter="url(#b18${k})" opacity=".6"><ellipse cx="80" cy="150" rx="100" ry="44" fill="${A}" opacity=".35" transform="rotate(-18 80 150)"/><ellipse cx="260" cy="90" rx="90" ry="36" fill="${B}" opacity=".32" transform="rotate(12 260 90)"/><ellipse cx="220" cy="420" rx="120" ry="34" fill="${A}" opacity=".18"/></g>`;
+    for (let i = 0; i < 150; i++) s += `<circle cx="${f(rnd(0, W))}" cy="${f(rnd(0, H))}" r="${f(rnd(0, 1) < .9 ? rnd(.4, 1.1) : rnd(1.2, 2))}" fill="#fff" opacity="${f(rnd(.12, .6))}"/>`;
+    s += `<path d="M${pts.map(p => f(p[0]) + ' ' + f(p[1])).join('L')}Z" fill="none" stroke="#fff" stroke-opacity=".2" stroke-width=".9" stroke-dasharray="2 4"/>`;
+    pts.forEach(([x, y, t, col]) => { const r = 2 + t * .45;
+      s += `<circle cx="${f(x)}" cy="${f(y)}" r="${f(r * 5)}" fill="${col}" opacity=".35" filter="url(#b4${k})"/><circle cx="${f(x)}" cy="${f(y)}" r="${f(r * 2.2)}" fill="url(#cr${k})"/>`
+        + `<path d="M${f(x)} ${f(y - r * 3.6)}L${f(x + .7)} ${f(y)}L${f(x)} ${f(y + r * 3.6)}L${f(x - .7)} ${f(y)}ZM${f(x - r * 3.6)} ${f(y)}L${f(x)} ${f(y + .7)}L${f(x + r * 3.6)} ${f(y)}L${f(x)} ${f(y - .7)}Z" fill="#fff" opacity=".85"/>`; });
+    return wrap(svg(s + finish(k)), hush(.35)); };
+  // SHIELD WALL: domed round shields with iron rims and a lit boss
+  P.plait = (A, B, k) => { let s = ''; const sh = (x, y, i) => { const c1 = i % 2 ? A : B, c2 = i % 2 ? B : A;
+      return `<g transform="translate(${x} ${y})" filter="url(#sh${k})"><circle r="30" fill="${tone(c1, -.25)}"/><path d="M0 -30A30 30 0 0 1 0 30Z" fill="${tone(c2, -.25)}"/><circle r="30" fill="url(#dm${k})"/>`
+        + `<circle r="29" fill="none" stroke="url(#rm${k})" stroke-width="3"/><circle r="8" fill="url(#bs${k})"/><circle r="8" fill="none" stroke="#000" stroke-opacity=".5"/><circle cx="-2.4" cy="-2.6" r="2" fill="#fff" opacity=".6"/></g>`; };
+    for (let i = 0; i < 9; i++){ s += sh(6, 30 + i * 64, i) + sh(W - 6, 62 + i * 64, i + 1); }
+    return wrap(svg(`<defs>${kit(k)}${rg('dm' + k, .38, .3, .75, [[0, '#fff', .3], [.5, '#fff', 0], [1, '#000', .45]])}${lg('rm' + k, 0, 0, 0, 1, [[0, '#B9BEC6'], [1, '#3C4048']])}${rg('bs' + k, .35, .3, .7, [[0, '#E9EDF2'], [.6, '#7C838D'], [1, '#2B2F35']])}</defs>` + s + finish(k)), hush(.5)); };
+  // MILLEFLEUR: tapestry flowers shaded petal by petal
+  P.lozengy = (A, B, k) => { seed = 21; let s = ''; const flower = (x, y, r, c) => { let p = ''; for (let i = 0; i < 5; i++) p += `<ellipse cx="0" cy="${f(-r * .6)}" rx="${f(r * .42)}" ry="${f(r * .62)}" transform="rotate(${i * 72})" fill="url(#pt${c === A ? 'a' : 'b'}${k})"/>`;
+      return `<g transform="translate(${f(x)} ${f(y)}) rotate(${f(rnd(0, 72))})" filter="url(#sh${k})">${p}<circle r="${f(r * .25)}" fill="${GOLD}"/><circle cx="${f(-r * .07)}" cy="${f(-r * .08)}" r="${f(r * .09)}" fill="#fff" opacity=".7"/></g>`; };
+    const leaf = (x, y) => `<path transform="translate(${f(x)} ${f(y)}) rotate(${f(rnd(0, 360))})" d="M0 0Q6 -10 0 -20Q-6 -10 0 0Z" fill="url(#lf${k})" opacity=".8"/>`;
+    for (let i = 0; i < 80; i++){ const x = rnd(0, 1) < .5 ? rnd(-10, 70) : rnd(W - 70, W + 10), y = rnd(-10, H + 10); s += leaf(x, y) + (i % 2 ? flower(x + 8, y + 6, rnd(7, 11), i % 4 === 1 ? A : B) : ''); }
+    for (let i = 0; i < 18; i++){ const x = rnd(70, W - 70), y = rnd(0, 1) < .5 ? rnd(-10, 60) : rnd(H - 60, H + 10); s += leaf(x, y) + flower(x + 6, y + 4, rnd(6, 9), i % 2 ? A : B); }
+    return wrap(svg(`<defs>${kit(k)}${rg('pta' + k, .5, .3, .7, [[0, tone(A, .55)], [1, tone(A, -.25)]])}${rg('ptb' + k, .5, .3, .7, [[0, tone(B, .55)], [1, tone(B, -.25)]])}${lg('lf' + k, 0, 0, 1, 1, [[0, '#6FA36A'], [1, '#22412A']])}</defs>`
+      + `<rect width="${W}" height="${H}" fill="#0E1A14" opacity=".35"/>${s}` + finish(k)), hush(.62)); };
+  // TAKE: round ink bamboo, near stalks lit along one side, far ones in mist
+  P.asanoha = (A, B, k) => { seed = 51; const stalk = (x, wd, op, c) => { let s = `<rect x="${x}" y="-10" width="${wd}" height="${H + 20}" fill="url(#bm${c}${k})" opacity="${op}"/>`;
+      for (let y = rnd(20, 70); y < H; y += rnd(70, 110)) s += `<rect x="${x - 1}" y="${f(y)}" width="${wd + 2}" height="3" rx="1.5" fill="${tone(c === 'a' ? A : B, -.6)}" opacity="${op}"/><rect x="${x}" y="${f(y - 1.5)}" width="${wd}" height="1" fill="#fff" opacity="${f(op * .25)}"/>`;
+      return s; };
+    const leaves = (x, y, s) => [0, 1, 2].map(i => `<path transform="translate(${x} ${y}) rotate(${-30 + i * 32 + rnd(-8, 8)}) scale(${s})" d="M0 0C10 -3 34 -2 46 2C34 6 10 6 0 0Z" fill="#0A100D" opacity=".9" filter="url(#sh${k})"/>`).join('');
+    const grove = `<g filter="url(#b4${k})">${stalk(54, 10, .35, 'b')}${stalk(70, 8, .3, 'a')}</g>${stalk(0, 22, .9, 'a')}${stalk(32, 14, .75, 'b')}${leaves(36, 140, 1)}${leaves(20, 330, .8)}${leaves(46, 470, .9)}`;
+    return wrap(svg(`<defs>${kit(k)}${lg('bma' + k, 0, 0, 1, 0, [[0, tone(A, -.85)], [.3, tone(A, -.35)], [.55, tone(A, -.5)], [1, tone(A, -.9)]])}${lg('bmb' + k, 0, 0, 1, 0, [[0, tone(B, -.85)], [.3, tone(B, -.35)], [.55, tone(B, -.5)], [1, tone(B, -.9)]])}`
+      + lg('ms' + k, 0, 0, 0, 1, [[0, '#cfd9d4', 0], [.7, '#cfd9d4', .1], [1, '#cfd9d4', .18]]) + `</defs>${grove}${mirror(grove)}<rect width="${W}" height="${H}" fill="url(#ms${k})"/>` + finish(k)), hush(.6)); };
+  // ARMS: the painted skill sigils, raised out of two corners
+  P.arms = (A, B, k, c) => { const ids = (c.ids || []).slice(0, 2);
+    // the painted sigil itself (no badge plate), sized to the card's width so a small preview shows the same picture
+    const one = (id, pos, deg, col, op) => { const g = sigilAt(id, 200); if (!g) return null;
+      return E('svg', { key: id + deg, width: '45.5cqw', height: '45.5cqw', viewBox: '0 0 24 24', fill: 'none', stroke: 'var(--ink)', strokeWidth: g.sw, strokeLinecap: g.cap || 'round', strokeLinejoin: g.join || 'round', 'aria-hidden': 'true',
+        style: Object.assign({ position: 'absolute', opacity: op, transform: `rotate(${deg}deg)`, overflow: 'visible',
+          filter: `drop-shadow(-1px -1px 0 rgb(255 255 255 / .3)) drop-shadow(4px 8px 8px rgb(0 0 0 / .75)) drop-shadow(0 0 26px ${col})` }, pos) },
+        g.parts(col).map((p, i) => E(p[0], Object.assign({ key: i }, p[1])))); };
+    return wrap(svg(`<defs>${kit(k)}${rg('pa' + k, 0, 1, .7, [[0, A, .32], [1, A, 0]])}${rg('pb' + k, 1, 0, .7, [[0, B, .26], [1, B, 0]])}</defs><rect width="${W}" height="${H}" fill="url(#pa${k})"/><rect width="${W}" height="${H}" fill="url(#pb${k})"/>`, 'p'),
+      one(ids[0], { left: '-5.7cqw', bottom: '-3.3cqw' }, -10, A, .45), one(ids[1] || ids[0], { right: '-7.5cqw', top: '-5.7cqw' }, 12, B, .38), svg(finish(k), 'f'), hush(.62)); };
+  // CREST: a struck medal centred on the class mark
+  P.crest = (A, B, k) => { let r = '';
+    for (let i = 0; i < 14; i++){ const R = 56 + i * 26, o = Math.max(.08, .75 - i * .055);
+      r += `<circle r="${R}" fill="none" stroke="#000" stroke-opacity="${f(o * .7)}" stroke-width="${i % 3 ? 2 : 4}" transform="translate(1.5 2.5)"/>`
+        + `<circle r="${R}" fill="none" stroke="url(#rg${k})" stroke-opacity="${f(o)}" stroke-width="${i % 3 ? 1.6 : 3.2}"/><circle r="${R - (i % 3 ? .8 : 1.6)}" fill="none" stroke="#fff" stroke-opacity="${f(o * .35)}" stroke-width=".6"/>`; }
+    let t = ''; for (let i = 0; i < 72; i++){ const a = i / 72 * Math.PI * 2, r2 = i % 6 ? 59 : 66; t += `<path d="M${f(Math.cos(a) * 52)} ${f(Math.sin(a) * 52)}L${f(Math.cos(a) * r2)} ${f(Math.sin(a) * r2)}"/>`; }
+    return wrap(svg(`<defs>${kit(k)}</defs>` + finish(k), 'f'),
+      pinMark(`<defs>${kit(k + 'm')}${lg('rg' + k, 0, 0, 1, 1, [[0, tone(A, .4)], [.5, A], [1, B]])}${rg('cl' + k, 0, 0, 260, [[0, A, .4], [.35, A, .12], [1, A, 0]], 1)}${rg('dk' + k, 0, 0, 50, [[0, tone(A, .5), .3], [.85, A, .08], [1, '#000', .35]], 1)}</defs>`
+        + `<circle r="400" fill="url(#cl${k})"/>${r}<circle r="50" fill="url(#dk${k})"/><g stroke="${tone(B, .3)}" stroke-width="1.3" opacity=".85" filter="url(#em${k}m)">${t}</g>`, 420), hush(.4, 52)); };
+  // SUNBURST: rays and a ring of light centred on the class mark
+  P.rays = (A, B, k) => { let s = `<defs>${kit(k + 'm')}${rg('ra' + k, 0, 0, 380, [[0, A, .42], [.5, A, .08], [1, A, 0]], 1)}${rg('rb' + k, 0, 0, 350, [[0, B, .3], [.55, B, .05], [1, B, 0]], 1)}${rg('sn' + k, 0, 0, 80, [[0, '#FFF3D6', .45], [.5, A, .22], [1, A, 0]], 1)}</defs>`;
+    for (let i = 0; i < 24; i++){ const a0 = i / 24 * Math.PI * 2, a1 = (i + .5) / 24 * Math.PI * 2, p = (a, r) => f(Math.cos(a) * r) + ' ' + f(Math.sin(a) * r);
+      s += `<path d="M0 0L${p(a0, 600)}L${p(a1, 600)}Z" fill="url(#${i % 2 ? 'rb' : 'ra'}${k})"/><path d="M${p(a0, 50)}L${p(a0, 600)}" stroke="#FFE9B8" stroke-opacity=".09"/>`; }
+    s += `<circle r="80" fill="url(#sn${k})"/><circle r="58" fill="none" stroke="#FFE9B8" stroke-opacity=".2" stroke-width="1.4"/><circle r="64" fill="none" stroke="#FFE9B8" stroke-opacity=".07" stroke-width="5"/>`;
+    return wrap(svg(`<defs>${kit(k)}</defs>` + finish(k), 'f'), pinMark(s, 600), hush(.62, 52)); };
+  // ILLUMINATED: a gilt bar with acanthus down the left, gold vines and bezants on the right
+  P.chequy = (A, B, k) => { seed = 33;
+    const acan = (x, y, deg, s, c) => `<g transform="translate(${x} ${y}) rotate(${deg}) scale(${s})" filter="url(#em${k})"><path d="M0 0C6 -10 20 -14 28 -6C34 0 30 10 22 10C16 10 14 4 18 2C22 0 24 5 22 6C26 4 26 -2 20 -4C12 -6 6 0 4 8C2 16 -4 18 -8 14C-12 10 -6 6 -2 8C-6 2 -4 -2 0 0Z" fill="url(#ac${c}${k})" stroke="#1A120A" stroke-width=".8"/>`
+      + `<path d="M2 2C8 -6 18 -8 24 -3" fill="none" stroke="#fff" stroke-width=".8" opacity=".55"/></g>`;
+    const bar = `<rect x="16" y="110" width="12" height="320" rx="3" fill="url(#gd${k})" filter="url(#sh${k})"/><rect x="18.5" y="112" width="7" height="316" rx="2" fill="url(#ab${k})"/>`
+      + [150, 210, 270, 330, 390].map(y => `<circle cx="22" cy="${y}" r="3.2" fill="url(#gd${k})"/>`).join('');
+    let vine = 'M318 80', bez = ''; for (let y = 80; y < 500; y += 40){ vine += `C${y % 80 ? 300 : 334} ${y + 13} ${y % 80 ? 334 : 300} ${y + 27} 318 ${y + 40}`;
+      bez += `<circle cx="${f(318 + (y % 80 ? -12 : 12))}" cy="${y + 20}" r="3" fill="url(#gd${k})" filter="url(#sh${k})"/><path transform="translate(${f(318 + (y % 80 ? 10 : -10))} ${y + 10}) rotate(${y % 80 ? 40 : -140})" d="M0 0C3 -3 3 -8 0 -11C-3 -8 -3 -3 0 0Z" fill="url(#ac${y % 160 ? 'a' : 'b'}${k})"/>`; }
+    return wrap(svg(`<defs>${kit(k)}${lg('gd' + k, 0, 0, 1, 1, [[0, tone(GOLD, .6)], [.45, GOLD], [.55, tone(GOLD, -.4)], [1, tone(GOLD, .15)]])}${lg('aca' + k, 0, 0, 1, 1, [[0, tone(A, .45)], [.6, A], [1, tone(A, -.45)]])}${lg('acb' + k, 0, 0, 1, 1, [[0, tone(B, .45)], [.6, B], [1, tone(B, -.45)]])}`
+      + lg('ab' + k, 0, 0, 0, 1, [[0, A], [.5, B], [1, A]]) + `</defs><rect x="8" y="58" width="${W - 16}" height="444" rx="8" fill="none" stroke="url(#gd${k})" stroke-width="1.4" opacity=".6"/>`
+      + bar + acan(22, 108, -100, 2, 'a') + acan(18, 96, -40, 1.7, 'b') + acan(26, 434, 80, 2, 'b') + acan(22, 446, 150, 1.7, 'a')
+      + `<path d="${vine}" fill="none" stroke="#000" stroke-opacity=".5" stroke-width="2.6" transform="translate(1 1.5)"/><path d="${vine}" fill="none" stroke="url(#gd${k})" stroke-width="1.6"/>${bez}`
+      + acan(304, 74, 200, 1.5, 'b') + acan(304, 490, 20, 1.5, 'a') + finish(k)), hush(.6)); };
+  // UME: a plum branch down the left edge and a sprig from the top right, clear of the class mark
+  P.shippo = (A, B, k) => { seed = 61; const br = 'M-10 64C20 80 40 70 52 104C62 134 40 170 56 210C66 238 44 270 30 300M52 104C70 100 84 84 88 70M56 210C74 206 86 220 96 232';
+    const br2 = 'M352 60C320 76 296 64 280 88C268 106 278 126 266 140M296 72C296 58 306 52 318 48';
+    const bloom = (x, y, r, c) => { let p = ''; for (let i = 0; i < 5; i++) p += `<circle cx="0" cy="${f(-r * .55)}" r="${f(r * .5)}" transform="rotate(${i * 72})" fill="url(#bl${c}${k})"/>`;
+      let sm = ''; for (let i = 0; i < 8; i++){ const a = i / 8 * Math.PI * 2; sm += `<path d="M0 0L${f(Math.cos(a) * r * .55)} ${f(Math.sin(a) * r * .55)}" stroke="${GOLD}" stroke-width=".6"/><circle cx="${f(Math.cos(a) * r * .58)}" cy="${f(Math.sin(a) * r * .58)}" r=".9" fill="${GOLD}"/>`; }
+      return `<g transform="translate(${x} ${y}) rotate(${f(rnd(0, 72))})" filter="url(#sh${k})">${p}<circle r="${f(r * .22)}" fill="${tone(c === 'a' ? A : B, -.3)}"/>${sm}</g>`; };
+    const bud = (x, y, c) => `<circle cx="${x}" cy="${y}" r="3.6" fill="url(#bl${c}${k})" filter="url(#sh${k})"/>`;
+    const limb = d => `<path d="${d}" fill="none" stroke="#000" stroke-opacity=".55" stroke-width="9" stroke-linecap="round" transform="translate(2 4)"/><path d="${d}" fill="none" stroke="url(#bk${k})" stroke-width="7" stroke-linecap="round"/><path d="${d}" fill="none" stroke="#C9A98C" stroke-opacity=".25" stroke-width="1" transform="translate(-1 -2)"/>`;
+    return wrap(svg(`<defs>${kit(k)}${lg('bk' + k, 0, 0, 1, 0, [[0, '#5A4232'], [.5, '#2B1E16'], [1, '#120C08']])}${rg('bla' + k, .5, .35, .7, [[0, tone(A, .7)], [.6, tone(A, .25)], [1, tone(A, -.2)]])}${rg('blb' + k, .5, .35, .7, [[0, tone(B, .7)], [.6, tone(B, .25)], [1, tone(B, -.2)]])}</defs>`
+      + limb(br) + limb(br2) + [[40, 82, 12, 'a'], [88, 66, 10, 'b'], [64, 150, 13, 'b'], [40, 190, 10, 'a'], [96, 230, 11, 'a'], [34, 292, 10, 'b'], [284, 92, 12, 'a'], [320, 46, 10, 'b'], [268, 136, 9, 'b']].map(p => bloom(p[0], p[1], p[2], p[3])).join('')
+      + bud(24, 120, 'a') + bud(70, 186, 'b') + bud(300, 110, 'a') + finish(k)), hush(.58)); };
+  // m206: Fjord + Runestone
+  // FJORD (round 4): round 3's view up the fjord at dusk, with mountains that have form. Every peak along every ridge is cut
+  // into a face turned to the low sun (warm, lit) and a face turned away (cold, in shadow); gullies run down from the dips,
+  // snow caps catch the light on the high ridges, pines stand on the near shore. Layers still pale with distance.
+  P.fjord = (A, B, k) => { const HZ = 300;
+    const ridge = (s, xEnd, top, bottom, close, col, op, sd, snowLine) => { seed = sd; const g = x => s > 0 ? x : W - x; const pts = [];
+      for (let x = 0; x <= xEnd; x += 6){ const t = x / xEnd, base = top + (bottom - top) * Math.pow(t, 1.25), j = Math.sin(x * .09 + sd) * 9 + Math.sin(x * .23 + sd * 2) * 5 + rnd(-3, 3); pts.push([x, base + j]); }
+      const P2 = p => f(g(p[0])) + ' ' + f(p[1]);
+      let out = `<path d="M${g(0)} ${close}L${pts.map(P2).join('L')}L${g(xEnd)} ${close}Z" fill="${col}" opacity="${op}"/>`;
+      // peaks and dips along the ridge
+      const pk = [], dp = [0];
+      for (let i = 1; i < pts.length - 1; i++){ if (pts[i][1] < pts[i - 1][1] && pts[i][1] <= pts[i + 1][1]) pk.push(i); if (pts[i][1] > pts[i - 1][1] && pts[i][1] >= pts[i + 1][1]) dp.push(i); }
+      dp.push(pts.length - 1);
+      pk.forEach(i => { const p = pts[i], a = dp.filter(d => d < i).pop(), b = dp.find(d => d > i), depth = Math.min(close - p[1], 90) * .75;
+        const foot = [p[0] + 3, p[1] + depth];
+        // the outer face (away from the sun in the middle) in shadow, the inner face lit
+        out += `<path d="M${P2(p)}L${pts.slice(a, i).reverse().map(P2).join('L')}L${P2([pts[a][0] + (p[0] - pts[a][0]) * .5, p[1] + depth * .9])}L${P2(foot)}Z" fill="#05080C" opacity="${f(op * .42)}"/>`
+          + `<path d="M${P2(p)}L${pts.slice(i + 1, b + 1).map(P2).join('L')}L${P2(foot)}Z" fill="url(#lt${k})" opacity="${f(op * .6)}"/>`
+          + `<path d="M${P2(p)}L${P2(foot)}" stroke="#05080C" stroke-opacity="${f(op * .35)}" stroke-width=".8"/>`;
+        if (snowLine && p[1] < snowLine){ const h = Math.min(16, (snowLine - p[1]) * .5 + 5);
+          out += `<path d="M${P2(p)}L${P2([p[0] + h * .7, p[1] + h * .8])}L${P2([p[0] + h * .3, p[1] + h * .6])}L${P2([p[0], p[1] + h])}L${P2([p[0] - h * .35, p[1] + h * .55])}L${P2([p[0] - h * .7, p[1] + h * .75])}Z" fill="#EEF3F6" opacity="${f(op * .85)}"/>`
+            + `<path d="M${P2(p)}L${P2([p[0], p[1] + h])}L${P2([p[0] - h * .35, p[1] + h * .55])}L${P2([p[0] - h * .7, p[1] + h * .75])}Z" fill="#8FA4B8" opacity="${f(op * .75)}"/>`; } });
+      dp.slice(1, -1).forEach(i => { const p = pts[i]; out += `<path d="M${P2(p)}L${P2([p[0] + 2, p[1] + 16])}L${P2([p[0] - 1, p[1] + 30])}" fill="none" stroke="#05080C" stroke-opacity="${f(op * .4)}" stroke-width="1"/>`; });
+      return out + `<path d="M${pts.map(P2).join('L')}" fill="none" stroke="#FFD9B0" stroke-opacity="${f(op * .3)}" stroke-width="1"/>`; };
+    const pine = (x, y, h) => `<path d="M${x} ${y - h}L${x + h * .22} ${y - h * .55}L${x + h * .12} ${y - h * .55}L${x + h * .3} ${y - h * .2}L${x + h * .15} ${y - h * .2}L${x + h * .34} ${y}H${x - h * .34}L${x - h * .15} ${y - h * .2}L${x - h * .3} ${y - h * .2}L${x - h * .12} ${y - h * .55}L${x - h * .22} ${y - h * .55}Z" fill="#070A0D"/>`;
+    const side = s => { const g = x => s > 0 ? x : W - x;
+      return ridge(s, 210, 150, HZ - 4, HZ, '#6A8096', .55, s > 0 ? 3 : 8, 200) + ridge(s, 160, 96, HZ + 2, HZ + 10, '#3E5266', .85, s > 0 ? 5 : 11, 150)
+        + ridge(s, 100, 70, HZ + 20, 420, '#223040', .95, s > 0 ? 7 : 13, 0)
+        + `<path d="M${g(0)} 200L${g(54)} 260L${g(62)} 380L${g(40)} ${H}L${g(0)} ${H}Z" fill="#10161C" filter="url(#sh${k})"/><path d="M${g(30)} 228L${g(54)} 260L${g(62)} 380" fill="none" stroke="#FFD2A0" stroke-opacity=".3" stroke-width="1.2"/>`
+        + [[16, 300, 30], [34, 318, 24], [10, 344, 38], [46, 362, 26]].map(([x, y, h]) => pine(g(x), y, h)).join(''); };
+    let shim = ''; seed = 4; for (let i = 0; i < 28; i++){ const y = HZ + 6 + i * 8, w = Math.max(6, 70 - i * 2.2) * (.6 + rnd(0, .8)); shim += `<rect x="${f(170 - w / 2 + rnd(-8, 8))}" y="${f(y)}" width="${f(w)}" height="1.2" fill="#FFD9A0" opacity="${f(.45 - i * .014)}"/>`; }
+    const ship = `<g transform="translate(296 344) scale(.95)" filter="url(#sh${k})"><path d="M-30 0Q0 9 30 0L35 -7Q0 1 -35 -7Z" fill="#2A1C10"/><path d="M-35 -7Q-40 -14 -36 -19M35 -7Q40 -14 36 -19" stroke="#2A1C10" stroke-width="2.2" fill="none" stroke-linecap="round"/>`
+      + [-20, -10, 0, 10, 20].map(x => `<circle cx="${x}" cy="-3" r="2.6" fill="${x % 20 ? B : A}" stroke="#1A120A" stroke-width=".6"/>`).join('')
+      + `<path d="M0 -6V-46" stroke="#2A1C10" stroke-width="1.6"/><path d="M-16 -42H16V-14Q0 -10 -16 -14Z" fill="url(#sl${k})" stroke="#1A120A" stroke-width=".6"/></g>`;
+    return wrap(svg(`<defs>${kit(k)}${lg('sk' + k, 0, 0, 0, 1, [[0, '#0A1018'], [.3, tone(A, -.55)], [.52, '#C88A5A'], [.54, '#2A3A4A'], [1, '#0A0F14']])}`
+      + `<linearGradient id="sl${k}" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="${A}"/><stop offset=".25" stop-color="${A}"/><stop offset=".25" stop-color="#EDE6D6"/><stop offset=".5" stop-color="#EDE6D6"/><stop offset=".5" stop-color="${A}"/><stop offset=".75" stop-color="${A}"/><stop offset=".75" stop-color="#EDE6D6"/><stop offset="1" stop-color="#EDE6D6"/></linearGradient>`
+      + lg('lt' + k, 0, 0, 0, 1, [[0, '#F2C494', .7], [.7, '#C88A5A', .15], [1, '#C88A5A', 0]])
+      + rg('sun' + k, 170, HZ, 170, [[0, '#FFE6B8', .75], [.15, '#F4A868', .4], [.5, '#E07A50', .1], [1, '#E07A50', 0]], 1) + `</defs>`
+      + `<rect width="${W}" height="${H}" fill="url(#sk${k})" opacity=".85"/><circle cx="170" cy="${HZ}" r="170" fill="url(#sun${k})"/>`
+      + side(1) + side(-1) + `<g filter="url(#b18${k})" opacity=".35"><rect x="30" y="${HZ - 12}" width="280" height="20" fill="#E6EEF2"/></g>${shim}`
+      + `${ship}<g transform="translate(0 ${2 * 344 + 4}) scale(1 -1)" opacity=".18">${ship}</g>` + finish(k)), hush(.55, 52)); };
+
+  // RUNESTONE (refined): granite lit from the top left with a worn bevel at the edges, flecks of lichen, the serpent's body carved
+  // with a double groove and painted, its runes cut as grooves with a lit lip, and a bigger head in the Urnes manner at the foot
+  P.knot = (A, B, k) => { const m = 24, r = 46, pts = [];
+    const add = (x, y) => pts.push([x, y]);
+    for (let y = 520; y >= 50 + r; y -= 4) add(m, y);
+    for (let a = 180; a <= 270; a += 6) add(m + r + Math.cos(a * Math.PI / 180) * r, 50 + r + Math.sin(a * Math.PI / 180) * r);
+    for (let x = m + r; x <= W - m - r; x += 4) add(x, 50);
+    for (let a = 270; a <= 360; a += 6) add(W - m - r + Math.cos(a * Math.PI / 180) * r, 50 + r + Math.sin(a * Math.PI / 180) * r);
+    for (let y = 50 + r; y <= 452; y += 4) add(W - m, y);
+    const line = 'M' + pts.map(p => f(p[0]) + ' ' + f(p[1])).join('L');
+    const RU = ['M0 -5V5M0 -2L3 -5M0 1L3 -2', 'M-1 -5V5M-1 -5L2 -2L-1 1M-1 1L2 5', 'M0 -5V5M-2 -3L2 3', 'M0 -5V5M0 -5L3 -2', 'M-2 -5V5M-2 -5L2 -1L2 5', 'M0 -5V5M0 0L3 -3M0 0L3 3', 'M-2 -5V5M2 -5V5M-2 -3L2 3', 'M0 -5V5M-3 -2L3 -2'];
+    let run = 0, runes = '', step = 0;
+    for (let i = 1; i < pts.length; i++){ const [x0, y0] = pts[i - 1], [x1, y1] = pts[i]; run += Math.hypot(x1 - x0, y1 - y0);
+      if (run >= 15){ run = 0; step++; const deg = Math.atan2(y1 - y0, x1 - x0) * 180 / Math.PI + 180, tr = `translate(${f(x1)} ${f(y1)}) rotate(${f(deg)})`;
+        runes += step % 7 === 0 ? `<circle cx="${f(x1)}" cy="${f(y1)}" r="1.5" fill="#120E0A"/>`
+          : `<g transform="${tr}"><path d="${RU[step % RU.length]}" stroke="#120E0A" stroke-width="1.6" stroke-linecap="round" fill="none"/><path d="${RU[step % RU.length]}" stroke="#fff" stroke-opacity=".22" stroke-width=".6" stroke-linecap="round" fill="none" transform="translate(.7 .8)"/></g>`; } }
+    seed = 17; let lichen = ''; for (let i = 0; i < 40; i++){ const x = rnd(0, 1) < .5 ? rnd(0, 60) : rnd(W - 60, W), y = rnd(50, 510); lichen += `<circle cx="${f(x)}" cy="${f(y)}" r="${f(rnd(.8, 2.6))}" fill="${rnd(0, 1) < .5 ? '#B9A24A' : '#8FA07A'}" opacity="${f(rnd(.15, .4))}"/>`; }
+    const end = pts[pts.length - 1], tail = pts[0];
+    // the head: almond eye, curled snout and lip, a crest lappet sweeping back; bigger, and turned in toward the card
+    const head = `<g transform="translate(${f(end[0])} ${f(end[1])}) rotate(10)" filter="url(#em${k})">`
+      + `<path d="M-12 0C-18 18 -14 38 -2 50C4 54 12 52 14 44C16 30 14 12 12 0Z" fill="url(#bd${k})" stroke="#120E0A" stroke-width="2.2"/>`
+      + `<path d="M-12 8C-26 14 -34 30 -28 42C-24 36 -18 30 -12 28" fill="url(#bd${k})" stroke="#120E0A" stroke-width="1.8"/>`
+      + `<path d="M-6 22C-2 18 6 18 8 24C4 28 -2 28 -6 22Z" fill="#F2E6C8" stroke="#120E0A" stroke-width="1.4"/><circle cx="1" cy="23" r="2" fill="#120E0A"/>`
+      + `<path d="M-2 44C-8 50 -8 58 -2 60M6 50C10 56 16 56 18 50" fill="none" stroke="#120E0A" stroke-width="1.8" stroke-linecap="round"/></g>`;
+    const tl = `<path d="M${f(tail[0])} ${f(tail[1])}C${f(tail[0])} ${f(tail[1] + 18)} ${f(tail[0] + 26)} ${f(tail[1] + 22)} ${f(tail[0] + 30)} ${f(tail[1] + 4)}" fill="none" stroke="#120E0A" stroke-width="10" stroke-linecap="round"/><path d="M${f(tail[0])} ${f(tail[1])}C${f(tail[0])} ${f(tail[1] + 18)} ${f(tail[0] + 26)} ${f(tail[1] + 22)} ${f(tail[0] + 30)} ${f(tail[1] + 4)}" fill="none" stroke="url(#bd${k})" stroke-width="6.5" stroke-linecap="round"/>`;
+    return wrap(svg(`<defs>${kit(k)}${lg('st' + k, 0, 0, 1, 1, [[0, '#5A5D62'], [.45, '#34373C'], [1, '#1A1C20']])}${lg('bd' + k, 0, 0, 1, 1, [[0, tone(A, .3)], [.5, A], [1, tone(A, -.4)]])}`
+      + `<filter id="rk${k}"><feTurbulence type="fractalNoise" baseFrequency=".035" numOctaves="4" seed="3"/><feColorMatrix values="0 0 0 0 .8  0 0 0 0 .82  0 0 0 0 .86  0 0 0 .55 0"/></filter>`
+      + rg('bv' + k, .5, .45, .72, [[.7, '#000', 0], [1, '#000', .55]]) + `</defs>`
+      + `<rect width="${W}" height="${H}" fill="url(#st${k})" opacity=".6"/><rect width="${W}" height="${H}" filter="url(#rk${k})" opacity=".26"/><rect width="${W}" height="${H}" filter="url(#gr${k})" opacity=".14"/>${lichen}<rect width="${W}" height="${H}" fill="url(#bv${k})"/>`
+      + `<path d="${line}" fill="none" stroke="#000" stroke-opacity=".6" stroke-width="27" transform="translate(1.5 3)" stroke-linejoin="round"/><path d="${line}" fill="none" stroke="#120E0A" stroke-width="25" stroke-linejoin="round"/>`
+      + `<path d="${line}" fill="none" stroke="#4A4540" stroke-width="21" stroke-linejoin="round"/><path d="${line}" fill="none" stroke="#120E0A" stroke-width="19" stroke-linejoin="round"/>`
+      + `<path d="${line}" fill="none" stroke="url(#bd${k})" stroke-width="16" stroke-linejoin="round"/><path d="${line}" fill="none" stroke="#000" stroke-opacity=".18" stroke-width="16" stroke-dasharray="1.5 5" stroke-linejoin="round"/><path d="${line}" fill="none" stroke="#fff" stroke-opacity=".2" stroke-width="1" transform="translate(-1 -1.5)" stroke-linejoin="round"/>`
+      + runes + tl + head + finish(k)), hush(.6, 50)); };
+  // m207: Cathedral + Tsuki
+  // CATHEDRAL (Gothic): looking down a ruined nave. Pointed bays recede toward a tall traceried window behind the class mark,
+  // its light the only warm thing in the cold stone; fog lies on the flagstones, shafts of light fall through dust, embers drift,
+  // and two candles burn at the feet of the nearest columns. Two-colour light (round 6): the window glass is split, the left lights
+  // in the first class colour and the right in the second; their light rims the columns and arches on each side and tints the fog.
+  P.blazon = (A, B, k) => { const VX = 170, VY = 150, FOG = '#3A3F4A';
+    const bay = (s, i, n) => { const hw = 168 * s, bot = VY + 380 * s, spring = VY - 70 * s, apex = VY - 250 * s, cw = 22 * s, l = VX - hw, r = VX + hw;
+      const fade = i / (n - 1), stone = tone('#1A1C21', .0), col = fade < .99 ? stone : stone;
+      const arch = `M${f(l)} ${f(spring)}C${f(l)} ${f(spring - 110 * s)} ${f(VX - 40 * s)} ${f(apex + 20 * s)} ${VX} ${f(apex)}C${f(VX + 40 * s)} ${f(apex + 20 * s)} ${f(r)} ${f(spring - 110 * s)} ${f(r)} ${f(spring)}`;
+      const column = x => `<rect x="${f(x - cw / 2)}" y="${f(spring)}" width="${f(cw)}" height="${f(bot - spring)}" fill="url(#cl${k})"/><rect x="${f(x < VX ? x + cw / 2 - 2.6 * s - .8 : x - cw / 2)}" y="${f(spring)}" width="${f(1.6 * s + .6)}" height="${f(bot - spring)}" fill="${x < VX ? A : B}" opacity="${f(.25 + .45 * s)}"/>`
+        + [-.3, 0, .3].map(t => `<rect x="${f(x + t * cw - cw * .06)}" y="${f(spring)}" width="${f(cw * .12)}" height="${f(bot - spring)}" fill="#000" opacity=".35"/>`).join('')
+        + `<rect x="${f(x - cw * .75)}" y="${f(spring - 6 * s)}" width="${f(cw * 1.5)}" height="${f(10 * s)}" fill="#2A2C32"/><rect x="${f(x - cw * .8)}" y="${f(bot - 12 * s)}" width="${f(cw * 1.6)}" height="${f(12 * s)}" fill="#24262C"/>`;
+      return `<g>` + column(l) + column(r)
+        + `<path d="${arch}" fill="none" stroke="#000" stroke-opacity=".5" stroke-width="${f(26 * s)}" transform="translate(0 ${f(4 * s)})"/><path d="${arch}" fill="none" stroke="url(#ar${k})" stroke-width="${f(22 * s)}"/>`
+        + `<path d="${arch}" fill="none" stroke="#0A0B0D" stroke-width="${f(3 * s)}" transform="translate(0 ${f(8 * s)})"/><path d="${arch}" fill="none" stroke="url(#rim${k})" stroke-opacity=".7" stroke-width="${f(1.4 * s + .4)}" transform="translate(0 ${f(-9 * s)})"/>`
+        // a stone rib from each spring toward the crown of the bay behind, so the vault reads
+        + `<path d="M${f(l)} ${f(spring)}Q${f(VX - hw * .55)} ${f(apex + 10 * s)} ${VX} ${f(apex + 26 * s)}M${f(r)} ${f(spring)}Q${f(VX + hw * .55)} ${f(apex + 10 * s)} ${VX} ${f(apex + 26 * s)}" fill="none" stroke="#2C2F36" stroke-width="${f(7 * s)}"/>`
+        + `</g><rect width="${W}" height="${H}" fill="${FOG}" opacity="${f(.16)}"/>`; };
+    const scales = [.18, .25, .34, .46, .62, .84, 1.12], n = scales.length;
+    let bays = ''; for (let i = 0; i < n; i++) bays += bay(scales[i], i, n);
+    // the far window: a tall lancet split by mullions, a rose of tracery in its head
+    const win = (() => { const w = 34, top = 58, bot = 236, sp = 104;
+      const out = `M${VX - w} ${bot}V${sp}C${VX - w} ${sp - 30} ${VX - 10} ${top + 6} ${VX} ${top}C${VX + 10} ${top + 6} ${VX + w} ${sp - 30} ${VX + w} ${sp}V${bot}Z`;
+      return `<g filter="url(#b18${k})" opacity=".9"><ellipse cx="${VX - 34}" cy="150" rx="70" ry="130" fill="${A}" opacity=".5"/><ellipse cx="${VX + 34}" cy="150" rx="70" ry="130" fill="${B}" opacity=".5"/></g>`
+        + `<path d="${out}" fill="url(#wg${k})"/><path d="${out}" fill="url(#wc${k})"/><g fill="none" stroke="#0B0C0F" stroke-width="3.2"><path d="${out}"/><path d="M${VX} 150V${bot}M${VX - 17} 132V${bot}M${VX + 17} 132V${bot}M${VX - w} 192H${VX + w}"/>`
+        + `<path d="M${VX - w} ${sp + 26}C${VX - w} 116 ${VX - 17} 112 ${VX - 17} 132M${VX + w} ${sp + 26}C${VX + w} 116 ${VX + 17} 112 ${VX + 17} 132M${VX - 17} 132Q${VX} 118 ${VX + 17} 132"/>`
+        + `<circle cx="${VX}" cy="96" r="15"/><path d="M${VX} 81V111M${VX - 15} 96H${VX + 15}M${VX - 10.6} 85.4L${VX + 10.6} 106.6M${VX + 10.6} 85.4L${VX - 10.6} 106.6" stroke-width="1.6"/></g>`; })();
+    seed = 29; let dust = '', embers = '';
+    for (let i = 0; i < 70; i++){ const t = rnd(0, 1); dust += `<circle cx="${f(VX + rnd(-60, 60) + t * rnd(-60, 60))}" cy="${f(rnd(80, 480))}" r="${f(rnd(.4, 1.1))}" fill="#E8E2D2" opacity="${f(rnd(.08, .3))}"/>`; }
+    for (let i = 0; i < 16; i++) embers += `<circle cx="${f(rnd(10, 330))}" cy="${f(rnd(250, 540))}" r="${f(rnd(.8, 1.8))}" fill="#FF8A3A" opacity="${f(rnd(.4, .9))}" filter="url(#eg${k})"/>`;
+    const candle = (x, y) => `<circle cx="${x}" cy="${y - 30}" r="34" fill="url(#cg${k})"/><rect x="${x - 4}" y="${y - 24}" width="8" height="24" rx="1.5" fill="#D8CCAE"/><rect x="${x - 4}" y="${y - 24}" width="3" height="24" fill="#fff" opacity=".25"/>`
+      + `<path d="M${x} ${y - 38}C${x + 4} ${y - 31} ${x + 3} ${y - 26} ${x} ${y - 25}C${x - 3} ${y - 26} ${x - 4} ${y - 31} ${x} ${y - 38}Z" fill="#FFD27A"/><path d="M${x - 9} ${y}H${x + 9}L${x + 6} ${y + 5}H${x - 6}Z" fill="#3A332A"/>`;
+    let floor = ''; for (let x = -340; x <= 680; x += 56) floor += `M${VX} ${VY}L${x} ${H}`; for (let y = 0; y < 7; y++) { const yy = VY + 380 * scales[y]; floor += `M0 ${f(yy)}H${W}`; }
+    return wrap(svg(`<defs>${kit(k)}${lg('cl' + k, 0, 0, 1, 0, [[0, '#0C0D10'], [.35, '#2A2D34'], [.6, '#4A4E57'], [1, '#121317']])}${lg('ar' + k, 0, 0, 0, 1, [[0, '#454952'], [1, '#1C1E23']])}`
+      + `<linearGradient id="wg${k}" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="${tone(A, .15)}"/><stop offset=".5" stop-color="${tone(A, .5)}"/><stop offset=".5" stop-color="${tone(B, .5)}"/><stop offset="1" stop-color="${tone(B, .15)}"/></linearGradient>` + rg('wc' + k, VX, 150, 70, [[0, '#fff', .55], [1, '#fff', 0]], 1) + `<linearGradient id="rim${k}" gradientUnits="userSpaceOnUse" x1="60" y1="0" x2="280" y2="0"><stop offset="0" stop-color="${tone(A, .35)}"/><stop offset=".5" stop-color="#C8C0B0"/><stop offset="1" stop-color="${tone(B, .35)}"/></linearGradient>` + `<linearGradient id="ft2${k}" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="${W}" y2="0"><stop offset="0" stop-color="${A}"/><stop offset="1" stop-color="${B}"/></linearGradient>` + rg('cg' + k, .5, .5, .5, [[0, '#FFB45A', .45], [1, '#FFB45A', 0]])
+      + rg('ng' + k, VX - 70, 170, 260, [[0, A, .52], [1, A, 0]], 1) + rg('nb' + k, VX + 70, 170, 260, [[0, B, .52], [1, B, 0]], 1)
+      + `<filter id="eg${k}" x="-200%" y="-200%" width="500%" height="500%"><feGaussianBlur stdDeviation="1.2"/></filter>`
+      + lg('fg' + k, 0, 0, 0, 1, [[0, '#B8C0CC', 0], [.6, '#B8C0CC', .22], [1, '#B8C0CC', .05]]) + `</defs>`
+      + `<rect width="${W}" height="${H}" fill="#0B0C0F"/>${win}<rect width="${W}" height="${H}" fill="url(#ng${k})"/><rect width="${W}" height="${H}" fill="url(#nb${k})"/>`
+      + `<path d="${floor}" stroke="#000" stroke-opacity=".35" stroke-width="1" clip-path="inset(0)"/>`
+      + bays
+      + `<g filter="url(#b18${k})" opacity=".2"><ellipse cx="40" cy="70" rx="120" ry="90" fill="${A}"/><ellipse cx="${W - 40}" cy="70" rx="120" ry="90" fill="${B}"/></g><g filter="url(#b18${k})" opacity=".36"><path d="M${VX - 30} 120L${VX - 150} 560H${VX - 60}Z" fill="${tone(A, .5)}"/><path d="M${VX + 30} 120L${VX + 150} 560H${VX + 60}Z" fill="${tone(B, .5)}"/></g>`
+      + `<rect y="380" width="${W}" height="180" fill="url(#fg${k})"/><rect y="380" width="${W}" height="180" fill="url(#ft2${k})" opacity=".12"/>${dust}${embers}` + candle(44, 520) + candle(W - 44, 520)
+      + finish(k)), hush(.5, 50)); };
+
+  // TSUKI: a great pale moon rises behind the class mark. The swept roofs of a castle keep stand dark against it at the foot,
+  // a pine branch reaches in from the top left, and thin clouds cross the moon's face. Two-colour light (round 6): the moon and
+  // everything it touches glow in the second class colour; the night sky and the far edges are lit in the first.
+  P.noren = (A, B, k) => { seed = 81;
+    const roof = (cx, y, w, h) => `<path d="M${cx - w} ${y}Q${cx - w * .55} ${y - h * .15} ${cx - w * .4} ${y - h}H${cx + w * .4}Q${cx + w * .55} ${y - h * .15} ${cx + w} ${y}Q${cx + w * .7} ${y - h * .05} ${cx + w * .55} ${y + 3}H${cx - w * .55}Q${cx - w * .7} ${y - h * .05} ${cx - w} ${y}Z" fill="#0B0D12"/>`
+      + `<path d="M${cx - w} ${y}Q${cx - w * .55} ${y - h * .15} ${cx - w * .4} ${y - h}" fill="none" stroke="${tone(B, .3)}" stroke-opacity=".7" stroke-width="1.4"/><path d="M${cx + w} ${y}Q${cx + w * .55} ${y - h * .15} ${cx + w * .4} ${y - h}" fill="none" stroke="${tone(A, .3)}" stroke-opacity=".6" stroke-width="1.2"/>`;
+    const wall = (cx, y, w, h) => `<rect x="${cx - w}" y="${y}" width="${w * 2}" height="${h}" fill="#12151B"/>` + Array.from({ length: Math.floor(w / 9) }, (_, i) => `<rect x="${f(cx - w + 6 + i * 18)}" y="${y + h * .35}" width="5" height="7" fill="${tone(B, .35)}" opacity=".7"/>`).join('');
+    const keep = `<g filter="url(#sh${k})" transform="translate(290 500) scale(.8) translate(-250 -500)">${wall(250, 452, 70, 120)}${roof(250, 452, 96, 26)}${wall(250, 406, 52, 46)}${roof(250, 406, 74, 24)}${wall(250, 366, 36, 40)}${roof(250, 366, 54, 22)}${wall(250, 332, 22, 34)}${roof(250, 332, 38, 20)}`
+      + `<path d="M226 312L232 304M274 312L268 304" stroke="#E6C46A" stroke-width="2.4" stroke-linecap="round"/><rect x="${0}" y="500" width="${W}" height="60" fill="#080A0E"/>`
+      + `<path d="M0 500L40 470L80 488L120 476L170 500Z" fill="#10131A"/></g>`;
+    const branch = `<g filter="url(#sh${k})"><path d="M-10 60C40 70 70 50 110 72C130 82 150 76 170 64" fill="none" stroke="#14110E" stroke-width="6" stroke-linecap="round"/><path d="M-10 58C40 68 70 48 110 70C130 80 150 74 170 62" fill="none" stroke="${tone(B, .3)}" stroke-opacity=".55" stroke-width="1.2"/><path d="M60 64C70 90 90 96 104 110" fill="none" stroke="#14110E" stroke-width="3.5" stroke-linecap="round"/>`
+      + [[110, 66, 26], [160, 58, 18], [50, 56, 22], [100, 106, 18]].map(([x, y, r]) => `<ellipse cx="${x}" cy="${y - 4}" rx="${r}" ry="${r * .36}" fill="#152019"/><ellipse cx="${x - 2}" cy="${y - 7}" rx="${r * .75}" ry="${r * .2}" fill="${tone(A, -.4)}" opacity=".6"/>`).join('') + `</g>`;
+    let stars = ''; for (let i = 0; i < 40; i++) stars += `<circle cx="${f(rnd(0, W))}" cy="${f(rnd(40, 300))}" r="${f(rnd(.4, 1.1))}" fill="#fff" opacity="${f(rnd(.15, .5))}"/>`;
+    return wrap(svg(`<defs>${kit(k)}${lg('nt' + k, 0, 0, 0, 1, [[0, '#070A12'], [.5, tone(A, -.7)], [1, '#06080C']])}${rg('mn' + k, .42, .38, .62, [[0, '#FFF8E6'], [.6, tone(B, .72)], [1, tone(B, .35)]])}`
+      + rg('mh' + k, 170, 150, 200, [[0, tone(B, .5), .38], [.4, B, .12], [1, B, 0]], 1) + rg('sa' + k, 40, 500, 300, [[0, A, .4], [1, A, 0]], 1) + rg('sb' + k, 320, 30, 220, [[0, A, .25], [1, A, 0]], 1)
+      + `<filter id="cr${k}"><feTurbulence type="fractalNoise" baseFrequency=".05" numOctaves="3" seed="2"/><feColorMatrix values="0 0 0 0 .55  0 0 0 0 .5  0 0 0 0 .42  0 0 0 .7 -.15"/><feComposite in2="SourceGraphic" operator="in"/></filter></defs>`
+      + `<rect width="${W}" height="${H}" fill="url(#nt${k})"/><rect width="${W}" height="${H}" fill="url(#sa${k})"/><rect width="${W}" height="${H}" fill="url(#sb${k})"/>${stars}<circle cx="170" cy="150" r="200" fill="url(#mh${k})"/>`
+      + `<circle cx="170" cy="146" r="70" fill="url(#mn${k})" opacity=".78"/><circle cx="170" cy="146" r="70" filter="url(#cr${k})" opacity=".5"/>`
+      + `<g filter="url(#b4${k})" opacity=".7"><path d="M30 176Q110 164 170 172T320 166L320 180Q240 186 170 184T30 190Z" fill="${tone(A, -.55)}"/><path d="M120 120Q180 112 240 118L250 126Q180 124 120 130Z" fill="${tone(A, -.4)}" opacity=".6"/></g><path d="M30 176Q110 164 170 172T320 166" fill="none" stroke="${tone(B, .4)}" stroke-opacity=".5" stroke-width="1.2"/>`
+      + keep + branch + finish(k)), hush(.55, 50)); };
+
+  if (!P[variant]) return null;
+  const A = SC[ids[0]] || '#C9C9CF', B = SC[ids[1]] || A, k = (variant + ids.join('')).replace(/[^a-z]/g, '');
+  return P[variant](A, B, k, cls, null, d);
+}
 // m161 (2026-10-22): card grounds, redrawn from the Zemin Tuvali round 1. A ground sits under everything on the face of the card,
 // so each one keeps its strength at the edges and stays quiet behind the name, the class and the numbers.
 // Drawn in the card's two class colours A and B; Constellation is drawn from the reader's own record.
@@ -9156,7 +9416,7 @@ function groundT(variant, A, B, ids, cls, d){
 
 // The theme grounds by their saved id, and the four retired ids folded into a kept one.
 const THEME_GROUND = { knot:'t_runes', fjord:'t_fjord', plait:'t_shields', blazon:'t_rose', lozengy:'t_fleurs', chequy:'t_margin', noren:'t_nami', asanoha:'t_take', shippo:'t_ume' };
-const GROUND_ALIAS = { twill:'plait', bendy:'chequy', kikko:'asanoha', yagasuri:'shippo' };
+const GROUND_ALIAS = { portrait:'rays', twill:'plait', bendy:'chequy', kikko:'asanoha', yagasuri:'shippo' };
 // The grounds everyone can earn, by their saved id.
 const GROUND_V2 = { none:'g_plain', arms:'g_arms', halved:'g_party', weave:'g_woven', crest:'g_halo', strata:'g_contour', portrait:'g_crest', stars:'g_stars', rays:'g_rays' };
 const ecKeys = () => ['acctName','cardTitle','profAvatar','profPhoto','profThumb','profClassPic','profInitial','profFeaturedSkills','profFeaturedHabitIds','cardBack','bannerSkills','frameEight','profBanner','mythicAura','auraEdgeOff','smLine','smSeason','nameFont','nameColor','nameFx','frameStep','profPinned','profSigilFrom'].concat(Object.keys(CARD_KIND).map(k => CARD_KIND[k][1]));
@@ -9237,17 +9497,16 @@ const CARD_SCHEMES = [
   ['weave',   'WEAVE',    'STREAK-2',            'Fortnight — hold a fourteen-day run.'],
   ['crest',   'CREST',    'CHALLENGE-3',         'The Monthly Trial — complete a monthly trial.'],
   ['strata',  'STRATA',   'CONSISTENCY-1',       'Fifty Sealed — seal fifty days.'],
-  ['portrait','PORTRAIT', 'TIER-3',              'Prestige — take a skill into Tier 7.'],
   ['stars',   'CONSTELLATION','BREADTH-1',        'All Eight — feed all eight skills in one sealed day.'],
   ['rays',    'SUNBURST', 'VOLUME-3',            'Six Figures — earn 100,000 XP in total.'],
   // Offered while the theme is worn; once chosen it stays chosen.
   ['knot',    'RUNESTONE',  null, 'Viking theme — the world-serpent of a raised stone, your name cut along it in runes.'],
   ['fjord',   'FJORD',      null, 'Viking theme — the walls of a fjord down both sides, a longship on the water.'],
   ['plait',   'SHIELD WALL',null, 'Viking theme — round shields hung down both sides, as on a longship.'],
-  ['blazon',  'ROSE WINDOW',null, 'Medieval theme — a cathedral rose over the head of the card.'],
+  ['blazon',  'CATHEDRAL',  null, 'Medieval theme — a Gothic nave, its window lit in your two colours.'],
   ['lozengy', 'MILLEFLEUR', null, 'Medieval theme — the thousand-flower ground of a tapestry.'],
   ['chequy',  'ILLUMINATED',null, 'Medieval theme — the ivy margin of a book of hours.'],
-  ['noren',   'NAMI',       null, 'Samurai theme — seigaiha waves rising from the foot, flakes of gold above.'],
+  ['noren',   'TSUKI',      null, 'Samurai theme — a moon rising over a castle keep, lit in your two colours.'],
   ['asanoha', 'TAKE',       null, 'Samurai theme — a bamboo grove in ink.'],
   ['shippo',  'UME',        null, 'Samurai theme — a plum branch in blossom.'],
 ];
@@ -18227,7 +18486,9 @@ class Component extends DCLogic {
       parts.map((p, k) => React.createElement(p[0], Object.assign({ key:k }, p[1]), p[2])));
   }
   cardBackEl(cls, variant){
-    const ids = (cls.ids || []).slice(0, 2);
+    let ids = (cls.ids || []).slice(0, 2);
+    // m205: an Unclassed card takes its two strongest skills' colours, so its ground still shows
+    if (!ids.length) ids = (((cls.d || this.state.d) || {}).skills || []).filter(s => s.xp > 0).sort((a, b) => b.xp - a.xp).slice(0, 2).map(s => s.id);
     if (!ids.length) return null;
     const A = SKILL_COLOR[ids[0]], B = SKILL_COLOR[ids[1]] || A;
     const abs = { position:'absolute', left:0, top:0, right:0, bottom:0, overflow:'hidden', pointerEvents:'none' };
@@ -18241,6 +18502,7 @@ class Component extends DCLogic {
     };
     // cls.d: a friend's card brings its own record (Constellation is drawn from it)
     variant = GROUND_ALIAS[variant] || variant;
+    { const p = groundP(variant, ids, Object.assign({}, cls, { ids }), cls.d || this.state.d, this); if (p) return p; }   // m205
     if (THEME_GROUND[variant]) return groundT(THEME_GROUND[variant], A, B, ids, cls, cls.d || this.state.d);
     if (GROUND_V2[variant]) return groundV2(GROUND_V2[variant], A, B, ids, cls, cls.d || this.state.d, sig);
     return null;
